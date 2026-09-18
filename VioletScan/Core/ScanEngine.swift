@@ -167,7 +167,7 @@ final class ScanEngine: NSObject, ObservableObject {
         defer { if let confMap { CVPixelBufferUnlockBaseAddress(confMap, .readOnly) } }
 
         guard let base = CVPixelBufferGetBaseAddress(depth) else { return }
-        let stride = CVPixelBufferGetBytesPerRow(depth)
+        let depthStrideBytes = CVPixelBufferGetBytesPerRow(depth)
         let confBase = confMap.flatMap { CVPixelBufferGetBaseAddress($0) }
         let confStride = confMap.map { CVPixelBufferGetBytesPerRow($0) } ?? 0
 
@@ -181,10 +181,10 @@ final class ScanEngine: NSObject, ObservableObject {
         var localAcc: Float = 0
         var localN = 0
 
-        for y in stride(from: 0, to: h, by: step) {
-            for x in stride(from: 0, to: w, by: step) {
-                let dRow = base.advanced(by: y * stride).assumingMemoryBound(to: Float32.self)
-                let z = dRow[x]
+        for y in Swift.stride(from: 0, to: h, by: step) {
+            for x in Swift.stride(from: 0, to: w, by: step) {
+                let dRow = base.advanced(by: y * depthStrideBytes).assumingMemoryBound(to: Float32.self)
+                let z = Float(dRow[x])
                 guard z.isFinite, z > 0.15, z < 5.0 else { continue }
                 var conf: Float = 0.5
                 if let confBase {
@@ -241,18 +241,16 @@ final class ScanEngine: NSObject, ObservableObject {
             let idxBuf = faces.buffer.contents().assumingMemoryBound(to: UInt32.self)
 
             let faceStep = max(1, faceCount / 400)
-            for f in stride(from: 0, to: faceCount, by: faceStep) {
+            for f in Swift.stride(from: 0, to: faceCount, by: faceStep) {
                 let base = f * indexCountPerFace
                 var centroid = SIMD3<Float>.zero
                 var normalAcc = SIMD3<Float>.zero
                 for k in 0..<min(3, indexCountPerFace) {
                     let vi = Int(idxBuf[base + k])
-                    let vp = vBuf.advanced(by: vi * strideBytes).assumingMemoryBound(to: (Float.self, Float.self, Float.self))
-                    let local = SIMD3(vp.pointee.0, vp.pointee.1, vp.pointee.2)
+                    let local = Self.loadFloat3(vBuf, index: vi, strideBytes: strideBytes)
                     let world4 = transform * SIMD4(local.x, local.y, local.z, 1)
                     centroid += SIMD3(world4.x, world4.y, world4.z)
-                    let np = nBuf.advanced(by: vi * nStride).assumingMemoryBound(to: (Float.self, Float.self, Float.self))
-                    let nLocal = SIMD3(np.pointee.0, np.pointee.1, np.pointee.2)
+                    let nLocal = Self.loadFloat3(nBuf, index: vi, strideBytes: nStride)
                     let nWorld = (transform * SIMD4(nLocal.x, nLocal.y, nLocal.z, 0))
                     normalAcc += SIMD3(nWorld.x, nWorld.y, nWorld.z)
                 }
@@ -276,9 +274,8 @@ final class ScanEngine: NSObject, ObservableObject {
                 let stepV = max(1, vCount / 2000)
                 let baseIndex = UInt32(rawMeshVertices.count)
                 var added = 0
-                for vi in stride(from: 0, to: vCount, by: stepV) {
-                    let vp = vBuf.advanced(by: vi * strideBytes).assumingMemoryBound(to: (Float.self, Float.self, Float.self))
-                    let local = SIMD3(vp.pointee.0, vp.pointee.1, vp.pointee.2)
+                for vi in Swift.stride(from: 0, to: vCount, by: stepV) {
+                    let local = Self.loadFloat3(vBuf, index: vi, strideBytes: strideBytes)
                     let world4 = transform * SIMD4(local.x, local.y, local.z, 1)
                     rawMeshVertices.append(SIMD3(world4.x, world4.y, world4.z))
                     added += 1
@@ -290,6 +287,13 @@ final class ScanEngine: NSObject, ObservableObject {
             lastMeshAnchorCount += 1
         }
     }
+
+    /// Load packed xyz floats from ARMesh source buffers (stride may be > 12).
+    private static func loadFloat3(_ buf: UnsafeMutableRawPointer, index: Int, strideBytes: Int) -> SIMD3<Float> {
+        let p = buf.advanced(by: index * strideBytes).assumingMemoryBound(to: Float.self)
+        return SIMD3(p[0], p[1], p[2])
+    }
+
 }
 
 extension ScanEngine: ARSessionDelegate {
