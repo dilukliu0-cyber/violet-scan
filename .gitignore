@@ -1,0 +1,44 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# XcodeGen
+# Keep project.yml; ignore generated project if present locally
+# (CI regenerates via xcodegen)
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Secrets / local
+.env
+*.pem
+*.p12
+*.mobileprovision
+AuthKey_*.p8
+Secrets/
+LocalOverrides/
+
+# SwiftPM
+.swiftpm/
+.build/
+Packages/
+Package.resolved
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Archives
+*.zip
+!Assets/**

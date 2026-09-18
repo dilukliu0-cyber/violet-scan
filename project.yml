@@ -1,0 +1,41 @@
+name: VioletScan
+options:
+  bundleIdPrefix: com.violetscan
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+settings:
+  SWIFT_VERSION: "5.9"
+  TARGETED_DEVICE_FAMILY: "1,2"
+  IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+targets:
+  VioletScan:
+    type: application
+    platform: iOS
+    sources:
+      - path: VioletScan
+      - path: VioletScanShared
+    settings:
+      PRODUCT_NAME: VioletScan
+      PRODUCT_BUNDLE_IDENTIFIER: com.violetscan.app
+      INFOPLIST_FILE: VioletScan/Info.plist
+      GENERATE_INFOPLIST_FILE: false
+      CODE_SIGN_STYLE: Automatic
+      CURRENT_PROJECT_VERSION: 1
+      MARKETING_VERSION: "0.1.0"
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      TARGETED_DEVICE_FAMILY: "1,2"
+      SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    entitlements:
+      path: VioletScan/VioletScan.entitlements
+
+schemes:
+  VioletScan:
+    build:
+      targets:
+        VioletScan: all
+    run:
+      config: Debug
+    archive:
+      config: Release
