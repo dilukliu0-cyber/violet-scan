@@ -1,0 +1,69 @@
+name: Build IPA
+
+# One-time enable: copy this file to .github/workflows/build-ipa.yml and commit
+# (requires GitHub token with \`workflow\` scope), OR paste via GitHub web UI → Actions → New workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer \
+            || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          xcodebuild -list -project VioletScan.xcodeproj
+
+      - name: Build (unsigned device .app)
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild \
+            -project VioletScan.xcodeproj \
+            -scheme VioletScan \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP=$(find build/DerivedData/Build/Products -name 'VioletScan.app' -type d | head -n 1)
+          echo "Found app: $APP"
+          test -n "$APP"
+          rm -rf build/Payload build/VioletScan-unsigned.ipa
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qr VioletScan-unsigned.ipa Payload)
+          ls -lh build/VioletScan-unsigned.ipa
+          unzip -Z1 build/VioletScan-unsigned.ipa | head -40
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VioletScan-unsigned-ipa
+          path: build/VioletScan-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
