@@ -1,8 +1,5 @@
 name: Build IPA
 
-# One-time enable: copy this file to .github/workflows/build-ipa.yml and commit
-# (requires GitHub token with `workflow` scope), OR paste via GitHub web UI → Actions → New workflow.
-
 on:
   workflow_dispatch:
   push:
@@ -10,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -18,9 +15,22 @@ jobs:
 
       - name: Select Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer \
-            || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          set -euo pipefail
+          for p in \
+            /Applications/Xcode_16.4.app/Contents/Developer \
+            /Applications/Xcode_16.3.app/Contents/Developer \
+            /Applications/Xcode_16.2.app/Contents/Developer \
+            /Applications/Xcode_16.1.app/Contents/Developer \
+            /Applications/Xcode_16.0.app/Contents/Developer \
+            /Applications/Xcode_16.app/Contents/Developer \
+            /Applications/Xcode.app/Contents/Developer; do
+            if [ -d "$p" ]; then
+              sudo xcode-select -s "$p"
+              break
+            fi
+          done
           xcodebuild -version
+          ls /Applications | grep -i Xcode || true
 
       - name: Install XcodeGen
         run: brew install xcodegen
