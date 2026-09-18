@@ -4,6 +4,13 @@ import ARKit
 import RealityKit
 import simd
 
+/// Lightweight point for live AR voxel overlay (confidence-colored).
+struct ScanOverlaySample: Sendable {
+    var position: SIMD3<Float>
+    var confidence: Float
+    var isLocked: Bool
+}
+
 /// ARSession + sceneDepth / LiDAR mesh accumulation into ConfidenceGrid across passes.
 @MainActor
 final class ScanEngine: NSObject, ObservableObject {
@@ -24,6 +31,10 @@ final class ScanEngine: NSObject, ObservableObject {
     @Published var currentPrecisionLabelRU: String = ""
     @Published var localConfidence: Float = 0
     @Published var distanceMeters: Float? = nil
+    /// Bumps when voxel overlay should redraw in ARView.
+    @Published var overlayTick: Int = 0
+    /// Subsampled grid cells for live confidence-colored spheres.
+    @Published var overlaySamples: [ScanOverlaySample] = []
 
     let grid = ConfidenceGrid()
     let precisionPlanner = PrecisionPassPlanner()
@@ -36,6 +47,7 @@ final class ScanEngine: NSObject, ObservableObject {
     private var frameCounter = 0
     private var trackingQuality: Float = 0.5
     private var lastMeshAnchorCount = 0
+    private var lastOverlayCellCount = -1
 
     /// Accumulated ARMesh geometry (world) for raw export — simplified vertex bag.
     private var rawMeshVertices: [SIMD3<Float>] = []
@@ -68,6 +80,15 @@ final class ScanEngine: NSObject, ObservableObject {
         rawMeshVertices.removeAll(keepingCapacity: true)
         rawMeshIndices.removeAll(keepingCapacity: true)
         precisionMode = false
+        overlaySamples = []
+        overlayTick = 0
+        lastOverlayCellCount = -1
+        coveragePercent = 0
+        quality = QualityBreakdown(coverage: 0, geometry: 0, tracking: 0, corners: 0)
+        cellCount = 0
+        lockedCells = 0
+        guidance = GuidanceHint(color: .unknown, messageRU: "ГОТОВО К СКАНИРОВАНИЮ", messageEN: "READY")
+        surfaceChipRU = "—"
         runSession(reset: true)
     }
 
@@ -154,6 +175,43 @@ final class ScanEngine: NSObject, ObservableObject {
         lockedCells = grid.lockedCount
         let stats = grid.coverageStats()
         surfaceChipRU = String(format: "пов. %.0f%% · lock %d", stats.meanConf * 100, stats.locked)
+        refreshOverlaySamples()
+    }
+
+    /// Subsample grid into bright debug voxels so the user SEES accumulation grow.
+    private func refreshOverlaySamples() {
+        let count = grid.cellCount
+        // Rebuild overlay when grid grows (or clears); skip tiny deltas to keep AR fluid.
+        let grew = lastOverlayCellCount < 0
+            || count == 0
+            || abs(count - lastOverlayCellCount) >= max(8, lastOverlayCellCount / 20)
+            || frameCounter % 30 == 0
+        guard grew else { return }
+        lastOverlayCellCount = count
+
+        let all = grid.allSamples()
+        guard !all.isEmpty else {
+            if !overlaySamples.isEmpty {
+                overlaySamples = []
+                overlayTick &+= 1
+            }
+            return
+        }
+        let step = max(1, all.count / 400)
+        var out: [ScanOverlaySample] = []
+        out.reserveCapacity(min(400, all.count))
+        var i = 0
+        while i < all.count {
+            let sample = all[i].1
+            out.append(ScanOverlaySample(
+                position: sample.positionSIMD,
+                confidence: sample.confidence,
+                isLocked: sample.isLocked
+            ))
+            i += step
+        }
+        overlaySamples = out
+        overlayTick &+= 1
     }
 
     private func ingestDepth(_ frame: ARFrame) {
@@ -317,8 +375,10 @@ extension ScanEngine: ARSessionDelegate {
             }
 
             let isPrecision = self.precisionMode
+            // Only treat localConfidence as valid once we have a distance sample.
+            let localConf: Float? = self.distanceMeters == nil ? nil : self.localConfidence
             let hint = GuidanceEngine.hint(
-                localConfidence: self.localConfidence,
+                localConfidence: localConf,
                 distanceMeters: self.distanceMeters,
                 isPrecisionTarget: isPrecision && self.precisionPlanner.current != nil,
                 trackingOK: self.trackingQuality > 0.35
@@ -337,7 +397,8 @@ extension ScanEngine: ARSessionDelegate {
                 }
             }
 
-            if self.frameCounter % 10 == 0 {
+            // Publish HUD metrics frequently on main actor so bars climb live.
+            if self.frameCounter % 5 == 0 {
                 self.publishStats()
             }
         }
@@ -346,12 +407,17 @@ extension ScanEngine: ARSessionDelegate {
     nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         Task { @MainActor in
             self.ingestMeshAnchors(anchors, timestamp: Date().timeIntervalSince1970)
+            self.publishStats()
         }
     }
 
     nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         Task { @MainActor in
             self.ingestMeshAnchors(anchors, timestamp: Date().timeIntervalSince1970)
+            // Mesh updates are less frequent than frames — refresh HUD each batch.
+            if self.frameCounter % 2 == 0 {
+                self.publishStats()
+            }
         }
     }
 }
